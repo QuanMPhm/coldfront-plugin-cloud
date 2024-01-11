@@ -1,7 +1,6 @@
 name: test-py39-functional-microshift
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
@@ -46,5 +45,10 @@ jobs:
 
       - name: Run functional tests
         run: |
-          echo Hello test
-          curl -u admin:pass https://onboarding-onboarding.cluster.local/users/admin -k
+          ./ci/run_functional_tests_openshift.sh
+
+      - name: Debug with tmate on failure
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+
+      
