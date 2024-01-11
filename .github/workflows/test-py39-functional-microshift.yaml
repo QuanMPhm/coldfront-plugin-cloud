@@ -9,7 +9,8 @@ on:
 env:
   PYTHONWARNINGS: ignore
   KUBECONFIG: ${{ github.workspace }}/kubeconfig
-  ACCT_MGT_VERSION: "44f8f13e4d876249ed2ee1a77fbac86dfd8b3960"
+  ACCT_MGT_VERSION: "6fdbf84e12cf67fc0e288df72788fa77d976ff0e"
+  # ACCT_MGT_VERSION: "44f8f13e4d876249ed2ee1a77fbac86dfd8b3960"
 
 jobs:
   build:
@@ -47,8 +48,8 @@ jobs:
         run: |
           ./ci/run_functional_tests_openshift.sh
 
-      - name: Debug with tmate on failure
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
+      # - name: Debug with tmate on failure
+      #   if: ${{ failure() }}
+      #   uses: mxschmitt/action-tmate@v3
 
       
