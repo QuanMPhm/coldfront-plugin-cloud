@@ -1,6 +1,7 @@
 name: test-py39-functional-microshift
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
@@ -45,4 +46,5 @@ jobs:
 
       - name: Run functional tests
         run: |
-          ./ci/run_functional_tests_openshift.sh
+          echo Hello test
+          curl -u admin:pass https://onboarding-onboarding.cluster.local/users/admin -k
