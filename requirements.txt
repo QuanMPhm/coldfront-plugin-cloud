@@ -5,3 +5,9 @@ python-memcached==1.59
 python-novaclient
 python-neutronclient
 python-swiftclient
+gunicorn
+# Flask
+kubernetes
+openshift
+# flask_httpauth
+python-dotenv
