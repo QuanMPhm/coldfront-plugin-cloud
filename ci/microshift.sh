@@ -53,7 +53,7 @@ git -C "$test_dir/openshift-acct-mgt" checkout "$ACCT_MGT_VERSION"
 
 echo "::group::Deploy openshift-acct-mgt"
 oc apply -k "$test_dir/openshift-acct-mgt/k8s/overlays/crc"
-oc wait -n onboarding --for=condition=available --timeout=800s deployment/onboarding
+oc wait -n onboarding --for=condition=available --timeout=1080s deployment/onboarding
 echo "::endgroup::"
 
 sleep 60
