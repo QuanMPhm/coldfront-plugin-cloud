@@ -12,6 +12,59 @@ from coldfront.core.resource import models as resource_models
 from coldfront_plugin_cloud.acct_mgt import moc_openshift
 from coldfront_plugin_cloud import attributes, base, utils
 
+QUOTA_OPENSHIFT = {
+":requests.cpu":                  { "base": 2, "coefficient": 0 },
+":requests.memory":               { "base": 2, "coefficient": 0 },
+":limits.cpu":                    { "base": 2, "coefficient": 0 },
+":limits.memory":                 { "base": 2, "coefficient": 0 },
+":requests.storage":              { "base": 2, "coefficient": 0, "units": "Gi" },
+":limits.storage":                { "base": 2, "coefficient": 0, "units": "Gi" },
+":requests.ephemeral-storage":    { "base": 2, "coefficient": 8, "units": "Gi" },
+":requests.nvidia.com/gpu":       { "base": 0, "coefficient": 0 },
+":limits.ephemeral-storage":      { "base": 2, "coefficient": 8, "units": "Gi" },
+":persistentvolumeclaims":        { "base": 2, "coefficient": 0 },
+":replicationcontrollers":        { "base": 2, "coefficient": 0 },
+":resourcequotas":                { "base": 5, "coefficient": 0 },
+":services":                      { "base": 4, "coefficient": 0 },
+":services.loadbalancers":        { "base": 2, "coefficient": 0 },
+":services.nodeports":            { "base": 2, "coefficient": 0 },
+":secrets":                       { "base": 4, "coefficient": 0 },
+":configmaps":                    { "base": 4, "coefficient": 0 },
+":openshift.io/imagestreams":     { "base": 2, "coefficient": 0 },
+"BestEffort:pods":                { "base": 2, "coefficient": 2 },
+"NotBestEffort:pods":             { "base": 2, "coefficient": 2 },
+"NotBestEffort:requests.memory":  { "base": 2, "coefficient": 4, "units": "Gi"  },
+"NotBestEffort:limits.memory":    { "base": 2, "coefficient": 4, "units": "Gi"  },
+"NotBestEffort:requests.cpu":     { "base": 2, "coefficient": 2 },
+"NotBestEffort:limits.cpu":       { "base": 2, "coefficient": 2 },
+"Terminating:pods":               { "base": 2, "coefficient": 2 },
+"Terminating:requests.memory":    { "base": 2, "coefficient": 4, "units": "Gi"  },
+"Terminating:limits.memory":      { "base": 2, "coefficient": 4, "units": "Gi"  },
+"Terminating:requests.cpu":       { "base": 2, "coefficient": 2 },
+"Terminating:limits.cpu":         { "base": 2, "coefficient": 2 },
+"NotTerminating:pods":            { "base": 2, "coefficient": 2 },
+"NotTerminating:requests.memory": { "base": 2, "coefficient": 4, "units": "Gi"  },
+"NotTerminating:limits.memory":   { "base": 2, "coefficient": 4, "units": "Gi"  },
+"NotTerminating:requests.cpu":    { "base": 2, "coefficient": 2 },
+"NotTerminating:limits.cpu":      { "base": 2, "coefficient": 2 }
+}
+
+LIMITS_OPENSHIFT = [
+    {
+        "type": "Container",
+        "default": {
+            "cpu": "2",
+            "memory": "1024Mi",
+            "nvidia.com/gpu": "0"
+        },
+        "defaultRequest": {
+            "cpu": "1",
+            "memory": "512Mi",
+            "nvidia.com/gpu": "0"
+        }
+    }
+]
+
 QUOTA_KEY_MAPPING = {
     attributes.QUOTA_LIMITS_CPU: lambda x: {":limits.cpu": f"{x * 1000}m"},
     attributes.QUOTA_LIMITS_MEMORY: lambda x: {":limits.memory": f"{x}Mi"},
@@ -71,9 +124,10 @@ class OpenShiftResourceAllocator(base.ResourceAllocator):
             logger = logging.getLogger()
         else:
             logger = logging.getLogger("django")
+
         config = env_config()
         self.client = moc_openshift.MocOpenShift4x(
-            DynamicClient(k8s_client), logger, config
+            DynamicClient(k8s_client), logger, config, QUOTA_OPENSHIFT, LIMITS_OPENSHIFT
         )
 
     def create_project(self, suggested_project_name):

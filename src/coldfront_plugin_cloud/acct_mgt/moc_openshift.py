@@ -59,17 +59,13 @@ class MocOpenShift4x:
                 f"Invalid role, {role} is not one of {', '.join(OPENSHIFT_ROLES)}"
             )
 
-    def __init__(self, client, logger, config):
+    def __init__(self, client, logger, config, quotas, limits):
         self.client = client
         self.logger = logger
         self.id_provider = config["IDENTITY_PROVIDER"]
-        self.quotafile = config["QUOTA_DEF_FILE"]
-        self.limitfile = config["LIMIT_DEF_FILE"]
+        self.quotas = quotas
+        self.limits = limits
         self.apis = {}
-
-        if not self.limitfile:
-            self.logger.error("No default limit file provided.")
-            sys.exit(1)
 
     def get_resource_api(self, api_version: str, kind: str):
         """Either return the cached resource api from self.apis, or fetch a
@@ -159,17 +155,15 @@ class MocOpenShift4x:
         return {"msg": "MOC quotas updated"}
 
     def get_quota_definitions(self):
-        self.logger.info("reading quotas from %s", self.quotafile)
-        with open(self.quotafile, "r") as file:
-            quota = json.load(file)
+
+        quota = self.quotas
         for k in quota:
             quota[k]["value"] = None
 
         return quota
 
     def get_limit_definitions(self):
-        with open(self.limitfile, "r") as file:
-            return json.load(file)
+        return self.limits
 
     def get_project(self, project_name):
         api = self.get_resource_api(API_PROJECT, "Project")
