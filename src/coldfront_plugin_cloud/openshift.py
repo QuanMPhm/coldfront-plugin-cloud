@@ -1,28 +1,23 @@
-import functools
-import json
 import logging
 import os
-import requests
-from requests.auth import HTTPBasicAuth
-import time
 
 from simplejson.errors import JSONDecodeError
 import kubernetes.config
 import kubernetes.client
 import kubernetes.dynamic.exceptions as kexc
 from openshift.dynamic import DynamicClient
-
 from coldfront.core.allocation import models as allocation_models
 from coldfront.core.resource import models as resource_models
 
-from .acct_mgt import moc_openshift
-
+from coldfront_plugin_cloud.acct_mgt import moc_openshift
 from coldfront_plugin_cloud import attributes, base, utils
 
 QUOTA_KEY_MAPPING = {
     attributes.QUOTA_LIMITS_CPU: lambda x: {":limits.cpu": f"{x * 1000}m"},
     attributes.QUOTA_LIMITS_MEMORY: lambda x: {":limits.memory": f"{x}Mi"},
-    attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB: lambda x: {":limits.ephemeral-storage": f"{x}Gi"},
+    attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB: lambda x: {
+        ":limits.ephemeral-storage": f"{x}Gi"
+    },
     attributes.QUOTA_REQUESTS_STORAGE: lambda x: {":requests.storage": f"{x}Gi"},
     attributes.QUOTA_REQUESTS_GPU: lambda x: {":requests.nvidia.com/gpu": f"{x}"},
     attributes.QUOTA_PVC: lambda x: {":persistentvolumeclaims": f"{x}"},
@@ -77,27 +72,9 @@ class OpenShiftResourceAllocator(base.ResourceAllocator):
         else:
             logger = logging.getLogger("django")
         config = env_config()
-
         self.client = moc_openshift.MocOpenShift4x(
             DynamicClient(k8s_client), logger, config
         )
-
-    @functools.cached_property
-    def session(self):
-        var_name = utils.env_safe_name(self.resource.name)
-        username = os.getenv(f"OPENSHIFT_{var_name}_USERNAME")
-        password = os.getenv(f"OPENSHIFT_{var_name}_PASSWORD")
-
-        session = requests.session()
-        if username and password:
-            session.auth = HTTPBasicAuth(username, password)
-
-        functional_tests = os.environ.get("FUNCTIONAL_TESTS", "").lower()
-        verify = os.getenv(f"OPENSHIFT_{var_name}_VERIFY", "").lower()
-        if functional_tests == "true" or verify == "false":
-            session.verify = False
-
-        return session
 
     def create_project(self, suggested_project_name):
         sanitized_project_name = utils.get_sanitized_project_name(
@@ -139,7 +116,9 @@ class OpenShiftResourceAllocator(base.ResourceAllocator):
 
     def get_federated_user(self, username):
         try:
-            if self.client.user_exists(username):
+            if self.client.user_exists(username) and self.client.identity_exists(
+                username and self.client.useridentitymapping_exists(username, username)
+            ):
                 return {"username": username}
 
             raise NotFound("404: " + f"user ({username}) does not exist")

@@ -5,7 +5,7 @@ python-memcached==1.59
 python-novaclient
 python-neutronclient
 python-swiftclient
+python-dotenv
 gunicorn
 kubernetes
 openshift
-python-dotenv
