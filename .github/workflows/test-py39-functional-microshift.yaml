@@ -40,9 +40,6 @@ jobs:
         run: |
           ./ci/microshift.sh
 
-      - name: Debugging with tmate
-        uses: mxschmitt/action-tmate@v3.17
-
       - name: Install ColdFront and plugin
         run: |
           ./ci/setup.sh
