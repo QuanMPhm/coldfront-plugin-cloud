@@ -23,6 +23,7 @@ GB_IN_BYTES = 1000000000
 
 # Map the attribute name in ColdFront, to the client of the respective
 # service, the version of the API, and the key in the payload.
+#
 # (Quan Pham) TODO: The name of the services should be the same as the
 # names or aliases listed in the Openstack Service Type Authority list 
 # (https://opendev.org/openstack/service-types-authority/)
