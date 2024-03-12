@@ -17,7 +17,10 @@ git clone https://github.com/knikolla/devstack-plugin-oidc /opt/stack/devstack-p
 source /opt/stack/devstack-plugin-oidc/tools/config.sh
 
 # Start Keycloak
-cd /opt/stack/devstack-plugin-oidc/tools && sudo docker-compose up -d
+cd /opt/stack/devstack-plugin-oidc/tools 
+# Temporary fix to use quay
+sed -i 's/jboss\/keycloak:latest/quay.io\/keycloak\/keycloak:23.0.1/g' ./docker-compose.yaml 
+sudo docker-compose up -d
 
 # Install and start Devstack
 git clone https://github.com/openstack/devstack.git /opt/stack/devstack
