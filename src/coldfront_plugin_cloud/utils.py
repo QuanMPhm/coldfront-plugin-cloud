@@ -58,7 +58,8 @@ def get_sanitized_project_name(project_name):
 def calculate_quota_unit_hours(allocation: Allocation,
                                attribute: str,
                                start: datetime,
-                               end: datetime):
+                               end: datetime,
+                               exclude_interval_list=None):
     """Returns unit*hours of quota allocated in a given period.
 
     Calculation is rounded up by the hour and tracks the history of change
@@ -149,13 +150,14 @@ def calculate_quota_unit_hours(allocation: Allocation,
             print(f"Matching request: Last event at {last_event_time}, cr at"
                   f" {cr.history.first().created}, change at {event_time}")
 
-            before = math.ceil((created - last_event_time).total_seconds())
-            after = math.ceil((event_time - created).total_seconds())
+            before = get_included_duration(last_event_time, created, exclude_interval_list)
+            after = get_included_duration(created, event_time, exclude_interval_list)
 
             value_times_seconds += (before * last_event_value) + (after * int(event.value))
             print(f"Last event at {last_event_time}, cr created at {created}, approved at {event_time}")
         else:
-            seconds_since_last_event = math.ceil((event_time - last_event_time).total_seconds())
+            seconds_since_last_event = get_included_duration(
+                last_event_time, event_time, exclude_interval_list)
             value_times_seconds += seconds_since_last_event * last_event_value
 
         last_event_time = event_time
@@ -163,7 +165,70 @@ def calculate_quota_unit_hours(allocation: Allocation,
         last_event_value = int(event.value)
 
     # The value remains the same from the last event until the end.
-    since_last_event = math.ceil((end - last_event_time).total_seconds())
+    since_last_event = get_included_duration(last_event_time, end, exclude_interval_list)
     value_times_seconds += since_last_event * last_event_value
 
     return math.ceil(value_times_seconds / 3600)
+
+def load_excluded_intervals(excluded_interval_arglist):
+    excluded_intervals_list = list()
+    for interval in excluded_interval_arglist:
+        start, end = interval.strip().split(",")
+        start_dt, end_dt = [datetime.datetime.strptime(i, "%Y-%m-%d") for i in [start, end]]
+        assert end_dt > start_dt, "Interval end date must be after start date"
+        excluded_intervals_list.append(
+            [
+                datetime.datetime.strptime(start, "%Y-%m-%d"),
+                datetime.datetime.strptime(end, "%Y-%m-%d")
+            ] 
+        )
+
+    return excluded_intervals_list
+
+def _clamp_time(time, min_time, max_time):
+    if time < min_time:
+        time = min_time
+    if time > max_time:
+        time = max_time
+    return time
+
+def _merge_date_ranges(intervals_list: list):
+    """
+    Takes in an unsorted list of datetime intervals, which may
+    contain overlapping intervals. Overlapping intervals will be
+    merged together
+
+    Returns a sorted list of non-overlapping intervals
+    """
+    def interval_sort_key(e):
+        return e[0]
+    
+    intervals_list.sort(key=interval_sort_key)
+    merged_interval_list = [intervals_list[0]]
+    merged_interval_list_i = 0
+    for i in range(1, len(intervals_list)):
+        prev_interval_end = intervals_list[i-1][1]
+        if intervals_list[i][0] <= prev_interval_end:
+            merged_interval_list[merged_interval_list_i][1] = max(prev_interval_end, intervals_list[i][1])
+        else:
+            merged_interval_list.append(intervals_list[i])
+            merged_interval_list_i += 1
+
+    return merged_interval_list
+
+
+def get_included_duration(start: datetime.datetime, 
+                          end: datetime.datetime, 
+                          excluded_intervals):
+    total_interval_duration = (end - start).total_seconds()
+    if not excluded_intervals: 
+        return total_interval_duration
+    
+    # In case the provided excluded intervals overlap with each other
+    excluded_intervals = _merge_date_ranges(excluded_intervals)
+    for e_interval_start, e_interval_end in excluded_intervals:
+        e_interval_start = _clamp_time(e_interval_start, start, end)
+        e_interval_end = _clamp_time(e_interval_end, start, end)
+        total_interval_duration -= (e_interval_end - e_interval_start).total_seconds()
+
+    return math.ceil(total_interval_duration)
