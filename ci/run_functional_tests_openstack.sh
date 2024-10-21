@@ -2,8 +2,8 @@
 #
 # Tests expect the resource to be name Devstack
 set -xe
-
-source /opt/stack/devstack-plugin-oidc/tools/config.sh
+REPO_PATH=$PWD
+source $REPO_PATH/ci/devstack-config-ip.sh 
 source /opt/stack/devstack/openrc admin admin
 
 credential_name=$(openssl rand -base64 12)
@@ -12,6 +12,9 @@ export OPENSTACK_DEVSTACK_APPLICATION_CREDENTIAL_SECRET=$(
     openstack application credential create "$credential_name" -f value -c secret)
 export OPENSTACK_DEVSTACK_APPLICATION_CREDENTIAL_ID=$(
     openstack application credential show "$credential_name" -f value -c id)
+
+export OPENSTACK_ESI_APPLICATION_CREDENTIAL_SECRET=$OPENSTACK_DEVSTACK_APPLICATION_CREDENTIAL_SECRET
+export OPENSTACK_ESI_APPLICATION_CREDENTIAL_ID=$OPENSTACK_DEVSTACK_APPLICATION_CREDENTIAL_ID
 
 export OPENSTACK_PUBLIC_NETWORK_ID=$(openstack network show public -f value -c id)
 
@@ -28,6 +31,7 @@ export KEYCLOAK_PASS="nomoresecret"
 export KEYCLOAK_REALM="master"
 
 coverage run --source="." -m django test coldfront_plugin_cloud.tests.functional.openstack
+coverage run --source="." -m django test coldfront_plugin_cloud.tests.functional.esi
 coverage report
 
 openstack application credential delete $OPENSTACK_DEVSTACK_APPLICATION_CREDENTIAL_ID

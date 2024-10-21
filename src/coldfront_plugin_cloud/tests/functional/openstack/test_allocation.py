@@ -1,6 +1,7 @@
 import os
 import unittest
 import uuid
+import time
 
 from coldfront_plugin_cloud import attributes, openstack, tasks, utils
 from coldfront_plugin_cloud.tests import base
@@ -17,7 +18,7 @@ class TestAllocation(base.TestBase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.resource = self.new_resource(name='Devstack',
+        self.resource = self.new_openstack_resource(name='Devstack',
                                           auth_url=os.getenv('OS_AUTH_URL'))
         self.session = openstack.get_session_for_resource(self.resource)
         self.identity = client.Client(session=self.session)
@@ -55,6 +56,8 @@ class TestAllocation(base.TestBase):
         self.assertEqual(roles[0].role['id'], self.role_member.id)
 
         # Check default network
+        # Port build-up time is not instant
+        time.sleep(5)
         network = self.networking.list_networks(
             project_id=project_id, name='default_network')['networks'][0]
         router = self.networking.list_routers(
@@ -201,6 +204,40 @@ class TestAllocation(base.TestBase):
         self.assertEqual(new_neutron_quota['floatingip'], 6)
         actual_nova_quota = self.compute.quotas.get(openstack_project.id)
         self.assertEqual(actual_nova_quota.__getattr__('cores'), 200)
+
+        # Change allocation attributes for object store quota
+        current_quota = allocator.get_quota(openstack_project.id)
+        obj_key = openstack.OpenStackResourceAllocator.QUOTA_KEY_MAPPING['object']['keys'][attributes.QUOTA_OBJECT_GB]
+        if obj_key in current_quota.keys():
+            utils.set_attribute_on_allocation(allocation, attributes.QUOTA_OBJECT_GB, 6)
+            self.assertEqual(allocation.get_attribute(attributes.QUOTA_OBJECT_GB), 6)
+            tasks.activate_allocation(allocation.pk)
+            self.assertEqual(
+                allocation.get_attribute(attributes.QUOTA_OBJECT_GB),
+                allocator.get_quota(openstack_project.id)[obj_key]
+            )
+
+            # setting 0 object quota in coldfront -> 1 byte quota in swift/rgw
+            utils.set_attribute_on_allocation(allocation, attributes.QUOTA_OBJECT_GB, 0)
+            self.assertEqual(allocation.get_attribute(attributes.QUOTA_OBJECT_GB), 0)
+            tasks.activate_allocation(allocation.pk)
+            obj_quota = allocator.object(project_id).head_account().get(obj_key)
+            self.assertEqual(int(obj_quota), 1)
+
+            # test validate_allocations works for object quota set to 0
+            utils.set_attribute_on_allocation(allocation, attributes.QUOTA_OBJECT_GB, 3)
+            self.assertEqual(allocation.get_attribute(attributes.QUOTA_OBJECT_GB), 3)
+            tasks.activate_allocation(allocation.pk)
+            self.assertEqual(
+                allocation.get_attribute(attributes.QUOTA_OBJECT_GB),
+                allocator.get_quota(openstack_project.id)[obj_key]
+            )
+            utils.set_attribute_on_allocation(allocation, attributes.QUOTA_OBJECT_GB, 0)
+            self.assertEqual(allocation.get_attribute(attributes.QUOTA_OBJECT_GB), 0)
+            call_command('validate_allocations', apply=True)
+            obj_quota = allocator.object(project_id).head_account().get(obj_key)
+            self.assertEqual(int(obj_quota), 1)
+
 
     def test_reactivate_allocation(self):
         user = self.new_user()

@@ -1,5 +1,5 @@
 import csv
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import dataclasses
 from datetime import datetime, timedelta
 import logging
@@ -13,6 +13,8 @@ from django.core.management.base import BaseCommand
 from coldfront.core.resource.models import Resource, ResourceType
 from coldfront.core.allocation.models import Allocation, AllocationStatusChoice
 import pytz
+
+from nerc_rates import load_from_url
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,8 +95,11 @@ class Command(BaseCommand):
                             default='https://s3.us-east-005.backblazeb2.com')
         parser.add_argument('--s3-bucket-name', type=str,
                             default='nerc-invoicing')
-        parser.add_option('--upload-to-s3',
+        parser.add_argument('--upload-to-s3', default=False, action='store_true',
                           help='Upload generated CSV invoice to S3 storage.')
+        parser.add_argument('--excluded-date-ranges', type=str, 
+                            default=None, nargs='+',
+                            help='List of date ranges excluded from billing')
 
     @staticmethod
     def default_start_argument():
@@ -147,18 +152,22 @@ class Command(BaseCommand):
             time = 0
             for attribute in attrs:
                 time += utils.calculate_quota_unit_hours(
-                    allocation, attribute, options['start'], options['end']
+                    allocation, attribute, options['start'], options['end'],
+                    excluded_intervals_list
                 )
             if time > 0:
                 row = InvoiceRow(
                     InvoiceMonth=options['invoice_month'],
                     Project_Name=allocation.get_attribute(attributes.ALLOCATION_PROJECT_NAME),
                     Project_ID=allocation.get_attribute(attributes.ALLOCATION_PROJECT_ID),
-                    PI=allocation.project.pi,
+                    PI=allocation.project.pi.email,
+                    Institution_Specific_Code=allocation.get_attribute(
+                        attributes.ALLOCATION_INSTITUTION_SPECIFIC_CODE
+                    ) or "N/A",
                     Invoice_Type_Hours=time,
                     Invoice_Type=su_name,
                     Rate=rate,
-                    Cost=time * rate
+                    Cost=(time * rate).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
                 )
                 csv_invoice_writer.writerow(
                     row.get_values()
@@ -167,6 +176,13 @@ class Command(BaseCommand):
         logger.info(f'Processing invoices for {options["invoice_month"]}.')
         logger.info(f'Interval {options["start"] - options["end"]}.')
 
+        if options["excluded_date_ranges"]:
+            excluded_intervals_list = utils.load_excluded_intervals(
+                options["excluded_date_ranges"]
+            )
+        else:
+            excluded_intervals_list = None
+            
         openstack_resources = Resource.objects.filter(
             resource_type=ResourceType.objects.get(
                 name='OpenStack'
@@ -184,6 +200,19 @@ class Command(BaseCommand):
             resources__in=openshift_resources
         )
 
+        rates = load_from_url()
+        openstack_storage_rate = openshift_storage_rate = Decimal(
+            rates.get_value_at('Storage GB Rate', options["invoice_month"]))
+        
+        if options['openstack_gb_rate']:
+            openstack_storage_rate = options['openstack_gb_rate']
+
+        if options['openshift_gb_rate']:
+            openshift_storage_rate = options['openshift_gb_rate']
+
+        logger.info(f'Using storage rate {openstack_storage_rate} (Openstack) and 
+                    {openshift_storage_rate} (Openshift) for {options["invoice_month"]}')
+
         logger.info(f'Writing to {options["output"]}.')
         with open(options['output'], 'w', newline='') as f:
             csv_invoice_writer = csv.writer(
@@ -194,29 +223,29 @@ class Command(BaseCommand):
 
             for allocation in openstack_allocations:
                 allocation_str = f'{allocation.pk} of project "{allocation.project.title}"'
-                msg = f'Starting billing for for allocation {allocation_str}.'
+                msg = f'Starting billing for allocation {allocation_str}.'
                 logger.debug(msg)
 
                 process_invoice_row(
                     allocation,
                     [attributes.QUOTA_VOLUMES_GB, attributes.QUOTA_OBJECT_GB],
                     "OpenStack Storage",
-                    options['openstack_gb_rate'])
+                    openstack_storage_rate)
 
             for allocation in openshift_allocations:
                 allocation_str = f'{allocation.pk} of project "{allocation.project.title}"'
-                msg = f'Starting billing for for allocation {allocation_str}.'
+                msg = f'Starting billing for allocation {allocation_str}.'
                 logger.debug(msg)
 
                 process_invoice_row(
                     allocation,
                     [attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, attributes.QUOTA_REQUESTS_STORAGE],
                     "OpenShift Storage",
-                    options['openshift_gb_rate']
+                    openshift_storage_rate
                 )
 
         if options['upload_to_s3']:
-            logger.info(f'Uploading to S3 endpoint {options['s3_endpoint_url']}.')
+            logger.info(f'Uploading to S3 endpoint {options["s3_endpoint_url"]}.')
             self.upload_to_s3(options['s3_endpoint_url'],
                               options['s3_bucket'],
                               options['output'],

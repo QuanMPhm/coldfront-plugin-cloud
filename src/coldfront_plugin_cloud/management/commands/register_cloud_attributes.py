@@ -25,6 +25,27 @@ ALLOCATION_ATTRIBUTE_MIGRATIONS = [
     ('OpenShift Limit on RAM Quota', {
         'name': 'OpenShift Limit on RAM Quota (MB)'
     }),
+    ('OpenStack Volume Quota', {
+        'name': 'OpenStack Number of Volumes Quota'
+    }),
+    ('OpenStack Compute RAM Quota', {
+        'name': 'OpenStack Compute RAM Quota (MiB)'
+    }),
+    ('OpenStack Volume GB Quota', {
+        'name': 'OpenStack Volume Quota (GiB)'
+    }),
+    ('OpenShift Limit on RAM Quota (MB)', {
+        'name': 'OpenShift Limit on RAM Quota (MiB)'
+    }),
+    ('OpenShift Limit on Ephemeral Storage Quota (GB)', {
+        'name': 'OpenShift Limit on Ephemeral Storage Quota (GiB)'
+    }),  
+    ('OpenShift Request on Storage Quota (GB)', {
+        'name': 'OpenShift Request on Storage Quota (GiB)'
+    }),
+    ('OpenStack Swift Quota in Gigabytes', {
+        'name': 'OpenStack Swift Quota (GiB)'
+    }),
 ]
 
 RESOURCE_ATTRIBUTE_MIGRATIONS = [
@@ -104,6 +125,9 @@ class Command(BaseCommand):
         )
         resource_models.ResourceType.objects.get_or_create(
             name='OpenShift', description='OpenShift Cloud'
+        )
+        resource_models.ResourceType.objects.get_or_create(
+            name='ESI', description='ESI Bare Metal Cloud'
         )
 
     def handle(self, *args, **options):
