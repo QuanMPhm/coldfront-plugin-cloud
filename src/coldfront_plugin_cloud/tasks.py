@@ -1,6 +1,8 @@
 import datetime
 import logging
 import time
+import functools
+from string import Template
 
 from coldfront.core.allocation.models import Allocation, AllocationUser
 
@@ -12,9 +14,15 @@ from coldfront_plugin_cloud import (
     esi,
     openshift_vm,
     utils,
+    kc_client,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache()
+def get_kc_client():
+    return kc_client.KeyCloakAPIClient()
 
 
 def find_allocator(allocation) -> base.ResourceAllocator:
@@ -128,3 +136,72 @@ def remove_user_from_allocation(allocation_user_pk):
             allocator.remove_role_from_user(username, project_id)
         else:
             logger.warning("No project has been created. Nothing to disable.")
+
+
+def _get_keycloak_group_name(allocation: Allocation, template_string: str) -> str:
+    """
+    Acceptable variables for the group name template string is:
+    - $resource_name: the name of the resource (e.g. "OpenShift")
+    - $project_name: the name of the project (e.g. "Test Project")
+    """
+    project_name = allocation.project.title
+    resource_name = allocation.resources.first().name
+
+    # TODO (Quan) Do we want to use Template strings instead of str.format() for safety?
+    # Do we also want some validation steps for the format string  to make sure it works?
+    # Do we also want to include allocation id or something at allocation level?
+    return Template(template_string).substitute(
+        resource_name=resource_name,
+        project_name=project_name,
+    )
+
+
+def add_user_to_keycloak(allocation_user_pk):
+    allocation_user = AllocationUser.objects.get(pk=allocation_user_pk)
+    allocation = allocation_user.allocation
+
+    kc_admin_client = get_kc_client()
+    username = allocation_user.user.username
+
+    if (user_id := kc_admin_client.get_user_id(username)) is None:
+        logger.warning(f"User {username} not found in Keycloak, cannot add to group.")
+        return
+
+    group_name_template = allocation.resources.first().get_attribute(
+        attributes.RESOURCE_KEYSTONE_GROUP_TEMPLATE
+    )
+    if group_name_template is None:
+        logger.warning(
+            f"No group name template specified for resource {allocation.resources.first().name}, cannot create Keycloak group."
+        )
+        return
+
+    group_name = _get_keycloak_group_name(allocation, group_name_template)
+    kc_admin_client.create_group(group_name)
+    group_id = kc_admin_client.get_group_id(group_name)
+    kc_admin_client.add_user_to_group(user_id, group_id)
+
+
+def remove_user_from_keycloak(allocation_user_pk):
+    allocation_user = AllocationUser.objects.get(pk=allocation_user_pk)
+    allocation = allocation_user.allocation
+
+    kc_admin_client = get_kc_client()
+    username = allocation_user.user.username
+
+    if (user_id := kc_admin_client.get_user_id(username)) is None:
+        logger.warning(f"User {username} not found in Keycloak, cannot add to group.")
+        return
+
+    group_name_template = allocation.resources.first().get_attribute(
+        attributes.RESOURCE_KEYSTONE_GROUP_TEMPLATE
+    )
+    if group_name_template is None:
+        logger.warning(
+            f"No group name template specified for resource {allocation.resources.first().name}, cannot create Keycloak group."
+        )
+        return
+
+    group_name = _get_keycloak_group_name(allocation, group_name_template)
+    group_id = kc_admin_client.get_group_id(group_name)
+    kc_admin_client.remove_user_from_group(user_id, group_id)
