@@ -20,6 +20,7 @@ export DJANGO_SETTINGS_MODULE="local_settings"
 export FUNCTIONAL_TESTS="True"
 export OS_AUTH_URL="https://localhost:5000"
 export PYTHONWARNINGS="ignore:Unverified HTTPS request"
+export DB_URL="postgres://postgres:postgres@localhost:5432/postgres"
 
 coverage run --source="." -m django test coldfront_plugin_cloud.tests.functional.openstack
 coverage run --source="." -m django test coldfront_plugin_cloud.tests.functional.esi
