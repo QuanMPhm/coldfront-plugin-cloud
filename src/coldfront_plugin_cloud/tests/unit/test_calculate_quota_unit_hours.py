@@ -1,5 +1,9 @@
+import csv
 import datetime
 import pytz
+import tempfile
+from decimal import Decimal
+from unittest.mock import Mock, patch
 
 import freezegun
 
@@ -8,13 +12,20 @@ from coldfront_plugin_cloud.tests import base
 from coldfront_plugin_cloud import utils
 
 from coldfront.core.allocation import models as allocation_models
+from django.core.management import call_command
+
+
+SECONDS_IN_DAY = 3600 * 24
 
 
 class TestCalculateAllocationQuotaHours(base.TestBase):
-    def test_new_allocation_quota(self):
+    @patch("coldfront_plugin_cloud.utils.load_outages_from_nerc_rates")
+    def test_new_allocation_quota(self, mock_load_outages):
+        """Test quota calculation with nerc-rates outages mocked."""
+        mock_load_outages.return_value = []
+
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
 
         with freezegun.freeze_time("2020-03-15 00:01:00"):
@@ -22,11 +33,13 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             project = self.new_project(pi=user)
             allocation = self.new_allocation(project, self.resource, 2)
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
 
         with freezegun.freeze_time("2020-03-16 23:59:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0
+            )
 
         allocation.refresh_from_db()
 
@@ -34,28 +47,72 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 96)
 
+        with tempfile.NamedTemporaryFile() as fp:
+            call_command(
+                "calculate_storage_gb_hours",
+                "--output",
+                fp.name,
+                "--start",
+                "2020-03-01",
+                "--end",
+                "2020-03-31",
+                "--openstack-nese-gb-rate",
+                "0.0000087890625",
+                "--openshift-nese-gb-rate",
+                "0.0000087890625",
+                "--openshift-ibm-gb-rate",
+                "0.00001",
+                "--invoice-month",
+                "2020-03",
+            )
+
+        # Let's test a complete CLI call. This is not for testing
+        # the validity but just the unerrored execution of the complete pipeline.
+        # Tests that verify the correct output are further down in the test file.
+        with tempfile.NamedTemporaryFile() as fp:
+            call_command(
+                "calculate_storage_gb_hours",
+                "--output",
+                fp.name,
+                "--start",
+                "2020-03-01",
+                "--end",
+                "2020-03-31",
+                "--openstack-nese-gb-rate",
+                "0.0000087890625",
+                "--openshift-nese-gb-rate",
+                "0.0000087890625",
+                "--openshift-ibm-gb-rate",
+                "0.00001",
+                "--invoice-month",
+                "2020-03",
+            )
 
     def test_new_allocation_quota_expired(self):
         """Test that expiration doesn't affect invoicing."""
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
         allocation = self.new_allocation(project, self.resource, 2)
-        allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="Active")
+        allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+            name="Active"
+        )
 
         with freezegun.freeze_time("2020-03-15 00:01:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
 
         with freezegun.freeze_time("2020-03-16 23:59:00"):
-            allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="Expired")
+            allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+                name="Expired"
+            )
             allocation.save()
 
         allocation.refresh_from_db()
@@ -64,7 +121,7 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 816)
 
@@ -72,7 +129,6 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
         """Test a simple case of invoicing until a status change."""
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
@@ -80,10 +136,13 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
 
         with freezegun.freeze_time("2020-03-15 00:01:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
 
         with freezegun.freeze_time("2020-03-16 23:59:00"):
-            allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="Denied")
+            allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+                name="Denied"
+            )
             allocation.save()
 
         allocation.refresh_from_db()
@@ -92,7 +151,7 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 96)
 
@@ -100,7 +159,6 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
         """Test that we correctly distinguish the last transition to an unbilled state."""
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
@@ -108,22 +166,29 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
 
         # Billable
         with freezegun.freeze_time("2020-03-15 00:01:00"):
-            allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="New")
+            allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+                name="New"
+            )
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
             allocation.save()
 
         allocation.refresh_from_db()
 
         with freezegun.freeze_time("2020-03-16 23:59:00"):
-            allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="Denied")
+            allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+                name="Denied"
+            )
             allocation.save()
 
         allocation.refresh_from_db()
 
         # Billable until here, since this is the last transition into an unbillable status.
         with freezegun.freeze_time("2020-03-17 23:59:00"):
-            allocation.status = allocation_models.AllocationStatusChoice.objects.get(name="Revoked")
+            allocation.status = allocation_models.AllocationStatusChoice.objects.get(
+                name="Revoked"
+            )
             allocation.save()
 
         allocation.refresh_from_db()
@@ -132,14 +197,13 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 144)
 
     def test_new_allocation_quota_new(self):
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
@@ -151,14 +215,13 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 4, 1, 0, 0, 0)),
-            pytz.utc.localize(datetime.datetime(2020, 5, 1, 0, 0, 0))
+            pytz.utc.localize(datetime.datetime(2020, 5, 1, 0, 0, 0)),
         )
         self.assertEqual(value, 0)
 
     def test_new_allocation_quota_never_approved(self):
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
@@ -173,14 +236,169 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 0)
+
+    def test_change_request_decrease(self):
+        """Test for when a change request decreases the quota"""
+        self.resource = self.new_openshift_resource(
+            name="",
+        )
+        user = self.new_user()
+        project = self.new_project(pi=user)
+        allocation = self.new_allocation(project, self.resource, 2)
+
+        with freezegun.freeze_time("2020-03-15 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
+
+        with freezegun.freeze_time("2020-03-17 00:00:00"):
+            cr = allocation_models.AllocationChangeRequest.objects.create(
+                allocation=allocation,
+                status=allocation_models.AllocationChangeStatusChoice.objects.filter(
+                    name="Approved"
+                ).first(),
+            )
+            attr = allocation_models.AllocationAttribute.objects.filter(
+                allocation_attribute_type__name=attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+                allocation=allocation,
+            ).first()
+            allocation_models.AllocationAttributeChangeRequest.objects.create(
+                allocation_change_request=cr,
+                allocation_attribute=attr,
+                new_value=0,
+            )
+
+        with freezegun.freeze_time("2020-03-19 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0
+            )
+
+        allocation.refresh_from_db()
+
+        value = utils.calculate_quota_unit_hours(
+            allocation,
+            attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+            pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
+        )
+        self.assertEqual(value, 96)
+
+    def test_change_request_increase(self):
+        """Test for when a change request increases the quota"""
+        self.resource = self.new_openshift_resource(
+            name="",
+        )
+        user = self.new_user()
+        project = self.new_project(pi=user)
+        allocation = self.new_allocation(project, self.resource, 2)
+
+        with freezegun.freeze_time("2020-03-15 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
+
+        with freezegun.freeze_time("2020-03-17 00:00:00"):
+            cr = allocation_models.AllocationChangeRequest.objects.create(
+                allocation=allocation,
+                status=allocation_models.AllocationChangeStatusChoice.objects.filter(
+                    name="Approved"
+                ).first(),
+            )
+            attr = allocation_models.AllocationAttribute.objects.filter(
+                allocation_attribute_type__name=attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+                allocation=allocation,
+            ).first()
+            allocation_models.AllocationAttributeChangeRequest.objects.create(
+                allocation_change_request=cr,
+                allocation_attribute=attr,
+                new_value=4,
+            )
+
+        with freezegun.freeze_time("2020-03-19 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 4
+            )
+
+        allocation.refresh_from_db()
+
+        value = utils.calculate_quota_unit_hours(
+            allocation,
+            attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+            pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
+            pytz.utc.localize(datetime.datetime(2020, 3, 20, 23, 59, 59)),
+        )
+        self.assertEqual(value, 384)
+
+    def test_change_request_decrease_multiple(self):
+        """Test for when multiple different change request decreases the quota"""
+        self.resource = self.new_openshift_resource(
+            name="",
+        )
+        user = self.new_user()
+        project = self.new_project(pi=user)
+        allocation = self.new_allocation(project, self.resource, 2)
+
+        with freezegun.freeze_time("2020-03-15 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
+
+        # In this case, approved CR is the first CR submitted
+        with freezegun.freeze_time("2020-03-16 00:00:00"):
+            cr = allocation_models.AllocationChangeRequest.objects.create(
+                allocation=allocation,
+                status=allocation_models.AllocationChangeStatusChoice.objects.filter(
+                    name="Approved"
+                ).first(),
+            )
+            attr = allocation_models.AllocationAttribute.objects.filter(
+                allocation_attribute_type__name=attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+                allocation=allocation,
+            ).first()
+            allocation_models.AllocationAttributeChangeRequest.objects.create(
+                allocation_change_request=cr,
+                allocation_attribute=attr,
+                new_value=0,
+            )
+
+        with freezegun.freeze_time("2020-03-17 00:00:00"):
+            cr = allocation_models.AllocationChangeRequest.objects.create(
+                allocation=allocation,
+                status=allocation_models.AllocationChangeStatusChoice.objects.filter(
+                    name="Approved"
+                ).first(),
+            )
+            attr = allocation_models.AllocationAttribute.objects.filter(
+                allocation_attribute_type__name=attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+                allocation=allocation,
+            ).first()
+            allocation_models.AllocationAttributeChangeRequest.objects.create(
+                allocation_change_request=cr,
+                allocation_attribute=attr,
+                new_value=1,
+            )
+
+        with freezegun.freeze_time("2020-03-19 00:00:00"):
+            utils.set_attribute_on_allocation(
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0
+            )
+
+        allocation.refresh_from_db()
+
+        value = utils.calculate_quota_unit_hours(
+            allocation,
+            attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
+            pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
+        )
+        self.assertEqual(value, 48)
 
     def test_new_allocation_quota_change_request(self):
         self.resource = self.new_openshift_resource(
             name="",
-            auth_url="",
         )
         user = self.new_user()
         project = self.new_project(pi=user)
@@ -188,17 +406,19 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
 
         with freezegun.freeze_time("2020-03-15 00:01:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
 
         with freezegun.freeze_time("2020-03-16 23:59:00"):
             cr = allocation_models.AllocationChangeRequest.objects.create(
                 allocation=allocation,
-                status = allocation_models.AllocationChangeStatusChoice.objects.filter(
-                    name="Approved").first()
+                status=allocation_models.AllocationChangeStatusChoice.objects.filter(
+                    name="Approved"
+                ).first(),
             )
             attr = allocation_models.AllocationAttribute.objects.filter(
                 allocation_attribute_type__name=attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
-                allocation=allocation
+                allocation=allocation,
             ).first()
             allocation_models.AllocationAttributeChangeRequest.objects.create(
                 allocation_change_request=cr,
@@ -208,15 +428,18 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
 
         with freezegun.freeze_time("2020-03-17 23:59:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0
+            )
 
         with freezegun.freeze_time("2020-03-18 23:59:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 2
+            )
 
         with freezegun.freeze_time("2020-03-19 23:59:00"):
             utils.set_attribute_on_allocation(
-                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0)
+                allocation, attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB, 0
+            )
 
         allocation.refresh_from_db()
 
@@ -224,6 +447,229 @@ class TestCalculateAllocationQuotaHours(base.TestBase):
             allocation,
             attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB,
             pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 1)),
-            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59))
+            pytz.utc.localize(datetime.datetime(2020, 3, 31, 23, 59, 59)),
         )
         self.assertEqual(value, 144)
+
+    def test_calculate_time_excluded_intervals(self):
+        """Test get_included_duration for correctness"""
+
+        def get_excluded_interval_datetime_list(excluded_interval_list):
+            return [
+                [
+                    datetime.datetime(t1[0], t1[1], t1[2], 0, 0, 0),
+                    datetime.datetime(t2[0], t2[1], t2[2], 0, 0, 0),
+                ]
+                for t1, t2 in excluded_interval_list
+            ]
+
+        # Single interval within active period
+        excluded_intervals = [
+            (
+                datetime.datetime(2020, 3, 15, 9, 30, 0),
+                datetime.datetime(2020, 3, 16, 10, 30, 0),
+            ),
+        ]
+
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 15, 0, 0, 0),
+            datetime.datetime(2020, 3, 17, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, SECONDS_IN_DAY * 1 - 3600)
+
+        # Interval starts before active period
+        excluded_intervals = get_excluded_interval_datetime_list(
+            (((2020, 3, 13), (2020, 3, 16)),)
+        )
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 15, 0, 0, 0),
+            datetime.datetime(2020, 3, 18, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, SECONDS_IN_DAY * 2)
+
+        # Interval ending after active period
+        excluded_intervals = get_excluded_interval_datetime_list(
+            (((2020, 3, 16), (2020, 3, 18)),)
+        )
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 15, 0, 0, 0),
+            datetime.datetime(2020, 3, 17, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, SECONDS_IN_DAY)
+
+        # Intervals outside active period
+        excluded_intervals = get_excluded_interval_datetime_list(
+            (
+                ((2020, 3, 1), (2020, 3, 5)),
+                ((2020, 3, 10), (2020, 3, 11)),
+                ((2020, 3, 20), (2020, 3, 25)),
+            )
+        )
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 12, 0, 0, 0),
+            datetime.datetime(2020, 3, 19, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, SECONDS_IN_DAY * 7)
+
+        # Multiple intervals in and out of active period
+        excluded_intervals = get_excluded_interval_datetime_list(
+            (
+                ((2020, 3, 13), (2020, 3, 15)),
+                ((2020, 3, 16), (2020, 3, 17)),
+                ((2020, 3, 18), (2020, 3, 20)),
+            )
+        )
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 14, 0, 0, 0),
+            datetime.datetime(2020, 3, 19, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, SECONDS_IN_DAY * 2)
+
+        # Interval completely excluded
+        excluded_intervals = get_excluded_interval_datetime_list(
+            (((2020, 3, 1), (2020, 3, 30)),)
+        )
+        value = utils.get_included_duration(
+            datetime.datetime(2020, 3, 14, 0, 0, 0),
+            datetime.datetime(2020, 3, 18, 0, 0, 0),
+            excluded_intervals,
+        )
+        self.assertEqual(value, 0)
+
+    def test_load_excluded_intervals(self):
+        """Test load_excluded_intervals returns valid output"""
+
+        # Single interval
+        interval_list = ["2023-01-01,2023-01-02"]
+        output = utils.load_excluded_intervals(interval_list)
+        self.assertEqual(
+            output,
+            [
+                [
+                    pytz.utc.localize(datetime.datetime(2023, 1, 1, 0, 0, 0)),
+                    pytz.utc.localize(datetime.datetime(2023, 1, 2, 0, 0, 0)),
+                ]
+            ],
+        )
+
+        # More than 1 interval
+        interval_list = [
+            "2023-01-01,2023-01-02",
+            "2023-01-04 09:00:00,2023-01-15 10:00:00",
+        ]
+        output = utils.load_excluded_intervals(interval_list)
+        self.assertEqual(
+            output,
+            [
+                [
+                    pytz.utc.localize(datetime.datetime(2023, 1, 1, 0, 0, 0)),
+                    pytz.utc.localize(datetime.datetime(2023, 1, 2, 0, 0, 0)),
+                ],
+                [
+                    pytz.utc.localize(datetime.datetime(2023, 1, 4, 9, 0, 0)),
+                    pytz.utc.localize(datetime.datetime(2023, 1, 15, 10, 0, 0)),
+                ],
+            ],
+        )
+
+    def test_load_excluded_intervals_invalid(self):
+        """Test when given invalid time intervals"""
+
+        # First interval is invalid
+        invalid_interval = ["foo"]
+        with self.assertRaises(ValueError):
+            utils.load_excluded_intervals(invalid_interval)
+
+        # First interval is valid, but not second
+        invalid_interval = ["2001-01-01,2002-01-01", "foo,foo"]
+        with self.assertRaises(ValueError):
+            utils.load_excluded_intervals(invalid_interval)
+
+        # End date is before start date
+        invalid_interval = ["2000-10-01,2000-01-01"]
+        with self.assertRaises(AssertionError):
+            utils.load_excluded_intervals(invalid_interval)
+
+        # Overlapping intervals
+        invalid_interval = [
+            "2000-01-01,2000-01-04",
+            "2000-01-02,2000-01-06",
+        ]
+        with self.assertRaises(AssertionError):
+            utils.load_excluded_intervals(invalid_interval)
+
+    @patch(
+        "coldfront_plugin_cloud.management.commands.calculate_storage_gb_hours.get_rates"
+    )
+    def test_nerc_outages_integration(self, mock_rates_loader):
+        """Test nerc-rates integration: get_outages_during called correctly and outages reduce billing."""
+        start = pytz.utc.localize(datetime.datetime(2020, 3, 1, 0, 0, 0))
+        end = pytz.utc.localize(datetime.datetime(2020, 3, 31, 0, 0, 0))
+        mock_outages = [
+            (
+                pytz.utc.localize(datetime.datetime(2020, 3, 10, 0, 0, 0)),
+                pytz.utc.localize(datetime.datetime(2020, 3, 12, 0, 0, 0)),
+            )
+        ]
+
+        mock_outages_data = Mock()
+        mock_outages_data.get_outages_during.return_value = mock_outages
+        mock_rates_loader.return_value.get_value_at.return_value = Decimal("0.001")
+
+        with patch.object(utils, "_OUTAGES_DATA", mock_outages_data):
+            with freezegun.freeze_time("2020-03-01"):
+                user = self.new_user()
+                project = self.new_project(pi=user)
+                resource = self.new_openshift_resource(
+                    name="TEST-RESOURCE", internal_name="test-service"
+                )
+                call_command(
+                    "add_quota_to_resource",
+                    display_name=attributes.QUOTA_REQUESTS_NESE_STORAGE,
+                    resource_name=resource.name,
+                    quota_label="ocs-external-storagecluster-ceph-rbd.storageclass.storage.k8s.io/requests.storage",
+                    multiplier=20,
+                    static_quota=0,
+                    unit_suffix="Gi",
+                    resource_type="storage",
+                    invoice_name="nese-storage",
+                )
+                allocation = self.new_allocation(project, resource, 100)
+                for attr, val in [
+                    (attributes.ALLOCATION_PROJECT_NAME, "test"),
+                    (attributes.ALLOCATION_PROJECT_ID, "123"),
+                    (attributes.QUOTA_REQUESTS_NESE_STORAGE, 10),
+                ]:
+                    utils.set_attribute_on_allocation(allocation, attr, val)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".csv"
+            ) as fp:
+                output_file = fp.name
+
+            call_command(
+                "calculate_storage_gb_hours",
+                "--output",
+                output_file,
+                "--start",
+                "2020-03-01",
+                "--end",
+                "2020-03-31",
+                "--invoice-month",
+                "2020-03",
+            )
+
+            mock_outages_data.get_outages_during.assert_called_once_with(
+                start.isoformat(), end.isoformat(), "test-service"
+            )
+
+            with open(output_file, "r") as f:
+                rows = list(csv.DictReader(f))
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(int(rows[0]["SU Hours (GBhr or SUhr)"]), 6720)

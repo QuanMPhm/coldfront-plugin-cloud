@@ -1,4 +1,4 @@
-name: test-py39-unit
+name: test-unit
 
 on:
   push:
@@ -8,20 +8,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v1
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: 3.12
 
       - name: Install ColdFront and plugin
         run: |
           ./ci/setup.sh
 
-      - name: Run functional tests
+      - name: Run unit tests
         run: |
           ./ci/run_unit_tests.sh
