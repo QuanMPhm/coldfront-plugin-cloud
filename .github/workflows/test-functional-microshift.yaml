@@ -1,4 +1,4 @@
-name: test-py39-functional-microshift
+name: test-functional-microshift
 
 on:
   push:
@@ -9,19 +9,20 @@ on:
 env:
   PYTHONWARNINGS: ignore
   KUBECONFIG: ${{ github.workspace }}/kubeconfig
-  ACCT_MGT_VERSION: "6012025c247ab25fb2cab3be9ad06080e28713ee"
+  ACCT_MGT_VERSION: "cecbe131843e5033ab6f6fdce2b5a8af58d80f9d"
+  DB_URL: "postgres://postgres:postgres@localhost:5432/postgres"
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.9"
+          python-version: 3.12
 
       - name: Fix for "grup-efi-amd64-signed" missing
         run: |

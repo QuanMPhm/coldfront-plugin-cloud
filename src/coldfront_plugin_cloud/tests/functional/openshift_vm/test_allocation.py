@@ -1,0 +1,104 @@
+import os
+import unittest
+
+from coldfront_plugin_cloud import attributes, openshift_vm, tasks
+from coldfront_plugin_cloud.tests import base
+
+from django.core.management import call_command
+
+
+@unittest.skipUnless(os.getenv("FUNCTIONAL_TESTS"), "Functional tests not enabled.")
+class TestAllocation(base.TestBase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.resource = cls.new_openshift_resource(
+            name="Microshift",
+            api_url=os.getenv("OS_API_URL"),
+            for_virtualization=True,
+        )
+        call_command("register_default_quotas", apply=True)
+        call_command(
+            "remove_quota_from_resource",
+            resource_name=cls.resource.name,
+            display_name=attributes.QUOTA_REQUESTS_GPU,
+            apply=True,
+        )
+        call_command(
+            "add_quota_to_resource",
+            display_name=attributes.QUOTA_REQUESTS_VM_GPU_A100_SXM4,
+            resource_name=cls.resource.name,
+            quota_label="requests.nvidia.com/A100_SXM4_40GB",
+            multiplier=0,
+            static_quota=0,
+            unit_suffix="",
+        )
+        call_command(
+            "add_quota_to_resource",
+            display_name=attributes.QUOTA_REQUESTS_VM_GPU_V100,
+            resource_name=cls.resource.name,
+            quota_label="requests.nvidia.com/GV100GL_Tesla_V100",
+            multiplier=0,
+            static_quota=0,
+            unit_suffix="",
+        )
+        call_command(
+            "add_quota_to_resource",
+            display_name=attributes.QUOTA_REQUESTS_VM_GPU_H100,
+            resource_name=cls.resource.name,
+            quota_label="requests.nvidia.com/H100_SXM5_80GB",
+            multiplier=0,
+            static_quota=0,
+            unit_suffix="",
+        )
+
+    def test_new_allocation(self):
+        # TODO must wait until we know what the quota values for openshift_vm are
+        user = self.new_user()
+        project = self.new_project(pi=user)
+        allocation = self.new_allocation(project, self.resource, 2)
+        allocator = openshift_vm.OpenShiftVMResourceAllocator(self.resource, allocation)
+
+        tasks.activate_allocation(allocation.pk)
+        allocation.refresh_from_db()
+
+        project_id = allocation.get_attribute(attributes.ALLOCATION_PROJECT_ID)
+
+        self.assertEqual(allocation.get_attribute(attributes.QUOTA_LIMITS_CPU), 2 * 1)
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_LIMITS_MEMORY), 2 * 4096
+        )
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_LIMITS_EPHEMERAL_STORAGE_GB),
+            2 * 5,
+        )
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_REQUESTS_NESE_STORAGE), 2 * 20
+        )
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_REQUESTS_VM_GPU_A100_SXM4), 2 * 0
+        )
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_REQUESTS_VM_GPU_V100), 2 * 0
+        )
+        self.assertEqual(
+            allocation.get_attribute(attributes.QUOTA_REQUESTS_VM_GPU_H100), 2 * 0
+        )
+        self.assertEqual(allocation.get_attribute(attributes.QUOTA_PVC), 2 * 2)
+
+        quota = allocator.get_quota(project_id)
+        # The return value will update to the most relevant unit, so
+        # 2000m cores becomes 2 and 8192Mi becomes 8Gi
+        self.assertEqual(
+            quota,
+            {
+                "limits.cpu": "2",
+                "limits.memory": "8Gi",
+                "limits.ephemeral-storage": "10Gi",
+                "ocs-external-storagecluster-ceph-rbd.storageclass.storage.k8s.io/requests.storage": "40Gi",
+                "requests.nvidia.com/A100_SXM4_40GB": "0",
+                "requests.nvidia.com/GV100GL_Tesla_V100": "0",
+                "requests.nvidia.com/H100_SXM5_80GB": "0",
+                "persistentvolumeclaims": "4",
+            },
+        )

@@ -1,0 +1,38 @@
+name: test-functional-microstack
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DB_URL: "postgres://postgres:postgres@localhost:5432/postgres"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.12
+
+      - name: Install dependencies, ColdFront and plugin
+        run: |
+          ./ci/setup.sh
+
+      - name: Install and start Ceph RadosGW
+        run: |
+          sudo ./ci/radosgw.sh
+
+      - name: Install and start Microstack
+        run: |
+          ./ci/microstack.sh
+
+      - name: Run functional tests
+        run: |
+          ./ci/run_functional_tests_openstack.sh
