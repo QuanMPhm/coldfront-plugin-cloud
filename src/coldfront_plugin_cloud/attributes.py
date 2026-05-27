@@ -20,6 +20,7 @@ class CloudAllocationAttribute:
     is_changeable: bool = True
 
 
+A = "A"
 RESOURCE_AUTH_URL = "Identity Endpoint URL"
 RESOURCE_API_URL = "OpenShift API Endpoint URL"
 RESOURCE_IDENTITY_NAME = "OpenShift Identity Provider Name"
